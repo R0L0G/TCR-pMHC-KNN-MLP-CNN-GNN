@@ -1,0 +1,39 @@
+# --- Dane źródłowe i pośrednie (odtwarzalne, zbyt duże dla Gita) ---
+# Szczegóły w README.md §2 "Czego NIE ma w repozytorium".
+TRAIT/Neg_obs/
+TRAIT/Pos_obs/
+TRAIT/negative_interactions.pkl
+TRAIT/positive_interactions.pkl
+graph_ready_data/
+CNN_embedings_data/tcr_embeddings_CNN.pkl
+
+# --- Podgrafy GNN: ~41 700 plików .pt, generowane przez graph.py (README §4) ---
+Graphs/
+
+# --- Modele pomocnicze z ablacji ważenia klas (results.json wystarcza) ---
+Wyniki_Ablation_Weighting/mlp_*.pt
+
+# --- Logi przebiegów ---
+*.log
+Wyniki_Diff_log.txt
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# --- LaTeX (artefakty kompilacji) ---
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.toc
+
+# --- Kopia uszkodzonej bazy obiektów Git (6,1 GB) ---
+# Do usunięcia dopiero po udanym pushu — patrz GIT_SETUP.md §A.4
+.git.uszkodzony/

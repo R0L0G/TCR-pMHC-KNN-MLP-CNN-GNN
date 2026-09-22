@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# ZERO konwersji końców linii w całym repo.
+# Wyniki_Ablation/summary_table.csv ma końce CR, a pliki TRAIT/ zawierają CR —
+# jakakolwiek normalizacja (text / eol=lf) zmodyfikowałaby je przy checkout.
+# ---------------------------------------------------------------------------
+* -text
+
+# ---------------------------------------------------------------------------
+# Git LFS — wyłącznie duże pliki binarne.
+# Wzorce muszą być ustalone PRZED pierwszym `git add` plików, których dotyczą,
+# inaczej trafią do zwykłej historii i trzeba będzie użyć `git lfs migrate`.
+# ---------------------------------------------------------------------------
+
+# Dane: splity Train/Val/Test, indeksy podgrafów, embeddingi MHC (~32 MB, 8 plików)
+*.pkl filter=lfs diff=lfs merge=lfs -text
+
+# Checkpointy: best_*.pt + Wyniki_Ablation/*/checkpoint.pt (~27 MB, 9 plików)
+*.pt filter=lfs diff=lfs merge=lfs -text
+
+# ---------------------------------------------------------------------------
+# CELOWO POZA LFS
+# ---------------------------------------------------------------------------
+# *.png   82 pliki, razem 2,6 MB, największy 46 KB. W LFS wymagałyby `git lfs pull`
+#         przed kompilacją pracy — pdflatex dostałby wskaźnik zamiast obrazka.
+# *.tex   109 KB tekstu. W LFS traci `git diff` i możliwość scalania.
+# *.npz   494 KB. Wejście dla regen_gnn_pr.py — ma działać zaraz po zwykłym klonie.
