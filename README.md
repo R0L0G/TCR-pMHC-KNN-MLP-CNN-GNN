@@ -38,7 +38,7 @@ które są zbyt duże dla Gita, ale w całości **odtwarzalne z kodu**:
 
 | Brakujące | Rozmiar | Czym odtworzyć | Etap |
 |---|---|---|---|
-| `TRAIT/Neg_obs/`, `TRAIT/Pos_obs/` | ~400 MB | dane źródłowe — pobierz osobno (patrz §3, krok 0) | wejście |
+| `TRAIT/Neg_obs/`, `TRAIT/Pos_obs/` | ~400 MB | dane źródłowe — pobierz z bazy TRAIT, [pgx.zju.edu.cn/traitdb](https://pgx.zju.edu.cn/traitdb) (szczegóły w §5, krok 0) | wejście |
 | `TRAIT/*.pkl` | ~270 MB | `Data_prep.py` | 1 |
 | `graph_ready_data/` | ~840 MB | `Data_prep.py` | 1 |
 | `CNN_embedings_data/tcr_embeddings_CNN.pkl` | ~GB | `CNN_embeddings.py` | 3 |
@@ -52,15 +52,21 @@ przejdź od razu do §5.6 — checkpointy i splity są w repo.
 ## 3. Pipeline danych (kolejność obowiązkowa)
 
 ```
-krok 0  TRAIT/Neg_obs/*.txt + TRAIT/Pos_obs/*.txt + TRAIT/MHC_pseudo_seqs.txt
+krok 0  TRAIT/Neg_obs/*.txt + TRAIT/Pos_obs/*.txt   (50 pMHC × pos/neg, z traitdb)
+        TRAIT/MHC_pseudo_seqs.txt
            |
 krok 1     |  python Data_prep.py                       (wolne, GPU — embeddingi ESM2)
+           |  scalenie -> ID receptorów -> rozbicie pMHC -> mean-pooling ESM2
            v
         graph_ready_data/{tcr,mhc,peptide}_embeddings.pkl, all_relations.pkl
            |
 krok 2     |  jupyter: train_test_split.ipynb           (jedyny krok bez wersji .py)
+           |  agregacja po parze TCR-pMHC (Binding = max)
+           |  ZAWĘŻENIE: Epitop = IE-1_CMV_binder, allele {HLA-A0301, HLA-A2402}
+           |  podział PO TCR (grupowy), seed 42, cel 20% / 20% / reszta
            v
         training_ready_data/{CMV_Dataset,Train_data,Val_data,Test.data}.pkl
+                             133 914      85 588      23 968      24 358
            |
 krok 3     |  python CNN_embeddings.py                  (embeddingi per-residue dla CNN)
            v
@@ -75,6 +81,10 @@ krok 5     |  python model_base.py                      (trening GNN -> best_gnn
 
 Kroki 1, 3 i 4 są kosztowne (godziny, GPU). Kroki 1–3 wykonują się „same” — kod zapisujący
 wyniki jest w nich aktywny. Krok 4 wymaga jednorazowej edycji opisanej niżej.
+
+**Uwaga o zakresie danych:** pobieranych jest 50 pMHC, ale krok 2 zawęża zbiór do **jednego
+epitopu (IE-1 z CMV) i dwóch alleli HLA**. Pozostałe pMHC nie biorą udziału w treningu ani
+ewaluacji — szczegóły i uzasadnienie w §5, krok 2b.
 
 ### Uwaga o embeddingach CNN (`tcr_embeddings_CNN.pkl`)
 
@@ -164,19 +174,88 @@ git lfs pull                # pobierz dane spod wskaźników LFS
 
 ### Krok 0 — dane źródłowe
 
-Umieść w repo (nie są wersjonowane, patrz §2):
+Dane pochodzą z **bazy TRAIT** (*T-cell Receptor–Antigen Interactions*), dostępnej publicznie
+**bez rejestracji i logowania**:
+
+- Baza: <https://pgx.zju.edu.cn/traitdb>
+- Publikacja: M. Wei i in., *TRAIT: A Comprehensive Database for T-cell Receptor–Antigen
+  Interactions*, Genomics, Proteomics & Bioinformatics 23(3):qzaf033, 2025,
+  DOI [10.1093/gpbjnl/qzaf033](https://doi.org/10.1093/gpbjnl/qzaf033)
+- Wpis w Database Commons (NGDC/CNCB): <https://ngdc.cncb.ac.cn/databasecommons/database/id/9707>
+
+#### Jak pobrać
+
+Wejdź na **<https://pgx.zju.edu.cn/traitdb/download/>**. Strona wystawia dane **osobno dla
+każdego pMHC** (kombinacji allel + peptyd), a każdy pMHC ma dwa archiwa: wiążące i niewiążące
+TCR. Konwencja nazw na stronie jest identyczna z tą w repo:
 
 ```
-TRAIT/Neg_obs/*.txt        50 plików, ~394 MB
-TRAIT/Pos_obs/*.txt        50 plików, ~2,5 MB
-TRAIT/MHC_pseudo_seqs.txt  (jest w repo)
+<MHC>_<peptyd>_<antygen>_<choroba>_binder_pos.zip     ->  TRAIT/Pos_obs/
+<MHC>_<peptyd>_<antygen>_<choroba>_binder_neg.zip     ->  TRAIT/Neg_obs/
 ```
+
+Pobierz **oba archiwa dla każdego z 50 pMHC** z listy poniżej, rozpakuj i umieść pliki `.txt`
+w odpowiednich katalogach. Dane są dostępne bez rejestracji i logowania.
+
+Pełna lista pobranych pMHC jest w repozytorium: **`TRAIT/epitope_list.tsv`** (allel MHC,
+peptyd, antygen, znacznik CMV). Rozkład po allelu: 28 × A0201, 5 × B0702, 4 × A2402,
+po 3 × B0801/A0301/A0101, 2 × A1101 i pojedyncze pozostałe; 9 pozycji pochodzi z CMV.
+
+Docelowe rozmieszczenie:
+
+```
+TRAIT/Pos_obs/<MHC>_<peptyd>_<białko>_binder_pos.txt     50 plików, ~2,5 MB
+TRAIT/Neg_obs/<MHC>_<peptyd>_<białko>_binder_neg.txt     50 plików, ~394 MB
+TRAIT/MHC_pseudo_seqs.txt                                (jest w repo)
+TRAIT/epitope_list.tsv                                   (jest w repo)
+```
+
+Przykład nazwy: `A0101_VTEHDTLLY_IE-1_CMV_binder_pos.txt` — allel `A0101`, peptyd
+`VTEHDTLLY`, białko `IE-1`, organizm `CMV`. Gdy epitop nie ma przypisanego źródła, w nazwie
+pojawia się `NC`; allele nieoznaczone mają prefiks `NR`, np. `NR(B0801)`.
+
+#### Format plików
+
+Pliki są **TSV** (rozdzielane tabulatorem) z nagłówkiem:
+
+```
+Donor  pMHC  TRAV  TRAJ  CDR3a  TRBV  TRBD  TRBJ  CDR3b  Binding  Count
+```
+
+Kolumny istotne dla pipeline'u:
+
+| Kolumna | Znaczenie | Gdzie używana |
+|---|---|---|
+| `pMHC` | `<MHC>_<peptyd>`, np. `A0201_NLVPMVATV` | `Data_prep.py` rozbija po `_` na MHC i peptyd |
+| `CDR3a`, `CDR3b` | sekwencje aminokwasowe łańcuchów α i β | wejście ESM2 dla wszystkich modeli |
+| `Binding` | `Binding` / `Non-binding` | etykieta klasy |
+| `TRAV`, `TRAJ`, `TRBV`, `TRBD`, `TRBJ` | segmenty genowe | zachowywane w `tcr_embeddings.pkl` |
+| `Donor`, `Count` | metadane | odrzucane w `Data_prep.py` |
+
+Allel z kolumny `pMHC` jest normalizowany funkcją `format_mhc()` (`Data_prep.py:17`):
+`A0201` → `HLA-A0201`, a prefiks `NR(...)` jest obcinany.
+
+> **Uwaga:** pliki mają końce linii **CR**. `.gitattributes` wymusza `* -text`, więc Git ich
+> nie modyfikuje, a `pandas.read_csv(sep="\t")` radzi sobie z nimi bez dodatkowych ustawień.
+
+#### Dlaczego dobór plików ma znaczenie
+
+`Data_prep.py` **konkatenuje wszystkie pliki znalezione w katalogu** (`dir_neg.iterdir()`),
+bez filtrowania po nazwie. Dodanie lub pominięcie choćby jednego epitopu zmienia cały zbiór,
+a w konsekwencji splity, embeddingi i wszystkie raportowane metryki. Trzymaj się listy
+z `TRAIT/epitope_list.tsv`.
 
 Sprawdzenie:
 
 ```bash
 ls TRAIT/Neg_obs | wc -l && ls TRAIT/Pos_obs | wc -l     # oczekiwane: 50 i 50
+diff <(ls TRAIT/Pos_obs | sed 's/_binder_pos\.txt$//') \
+     <(ls TRAIT/Neg_obs | sed 's/_binder_neg\.txt$//')   # oczekiwane: brak różnic
 ```
+
+> Jeśli chcesz **dokładnie** powtórzyć liczby z pracy, a nie tylko powtórzyć metodę — użyj
+> splitów z `training_ready_data/` (są w repo) i pomiń kroki 1–2. Ponowne pobranie danych
+> z nowszej wersji bazy TRAIT może dać inny materiał wejściowy.
 
 ### Krok 1 — embeddingi ESM2 (wolne, GPU, wymaga internetu)
 
@@ -184,7 +263,25 @@ ls TRAIT/Neg_obs | wc -l && ls TRAIT/Pos_obs | wc -l     # oczekiwane: 50 i 50
 python Data_prep.py
 ```
 
-Pobiera `esm2_t30_150M_UR50D` przez `torch.hub` i zapisuje:
+Skrypt wykonuje kolejno:
+
+1. **Scalenie** — wczytuje wszystkie pliki z `TRAIT/Neg_obs` i `TRAIT/Pos_obs`
+   (`pd.read_csv(sep="\t")`) i konkatenuje je w dwie ramki, zapisywane jako
+   `TRAIT/{negative,positive}_interactions.pkl`. Jeśli te pliki już istnieją, krok jest
+   pomijany i dane ładowane z cache'u.
+2. **Deduplikacja TCR** — unikalne pary `(CDR3a, CDR3b)` dostają sztuczne identyfikatory
+   `TCR_1 … TCR_n`. Ten sam receptor pojawiający się przy wielu pMHC ma jeden identyfikator.
+3. **Rozbicie pMHC** — kolumna `pMHC` (`<MHC>_<peptyd>_<antygen>_<choroba>`) jest dzielona:
+   człon 1 → allel, człon 2 → peptyd, człony 3+ → `Epitop`. Allel przechodzi przez
+   `format_mhc()` (`Data_prep.py:17`), dającą postać `HLA-A0301`.
+4. **Pseudosekwencje MHC** — dołączane z `TRAIT/MHC_pseudo_seqs.txt` (format: allel i sekwencja
+   rozdzielone spacją) przez `merge` po `HLA_MHC`.
+5. **Embeddingi ESM2** — `esm2_t30_150M_UR50D` pobierany przez `torch.hub`, uśredniany po
+   pozycjach (mean-pooling): osobno dla CDR3α, CDR3β, pseudosekwencji MHC i peptydów.
+6. **Klucz interakcji** — każda para TCR–pMHC dostaje unikalne `Name` w postaci
+   `<pMHC>_<TCR_name>`. To po nim `eval_diff_ci.py` wyrównuje predykcje modeli.
+
+Wynik:
 
 ```
 TRAIT/{negative,positive}_interactions.pkl
@@ -198,20 +295,112 @@ Sprawdzenie:
 ls -la graph_ready_data/     # 4 pliki, razem ~840 MB
 ```
 
-### Krok 2 — podział na zbiory
+### Krok 2 — zawężenie zbioru i podział na Train/Val/Test
 
 ```bash
 jupyter notebook train_test_split.ipynb     # uruchom wszystkie komórki
 ```
 
-Jedyny krok pipeline'u bez wersji `.py`. Zapisuje:
+Jedyny krok pipeline'u bez wersji `.py`. Wykonuje dwie rzeczy, które decydują o kształcie
+całego eksperymentu.
+
+#### 2a. Agregacja duplikatów
+
+`all_relations` jest grupowane po kluczu `Name` (czyli po parze TCR–pMHC). Dla każdej grupy:
+
+| Kolumna | Agregacja | Konsekwencja |
+|---|---|---|
+| `Binding` | **`max`** | jeśli para wystąpiła choć raz jako wiążąca, cała para jest pozytywna |
+| `Count` | `max` | zachowywana jest najwyższa liczność |
+| pozostałe | `first` | metadane z pierwszego wystąpienia |
+
+Wcześniej odrzucane są kolumny `Donor` oraz segmenty genowe `TRAV/TRAJ/TRBV/TRBD/TRBJ`
+(te ostatnie pozostają w `tcr_embeddings.pkl`).
+
+#### 2b. Zawężenie do jednego epitopu i dwóch alleli
+
+```python
+CMV_dane_oczyszczone = all_relations[
+    (all_relations["Epitop"] == "IE-1_CMV_binder") &
+    (all_relations["HLA_MHC"].isin(["HLA-A0301", "HLA-A2402"]))
+]
+```
+
+To najważniejsza decyzja w całym przygotowaniu danych. Choć pobieranych jest 50 pMHC,
+**modelowany jest wyłącznie epitop IE-1 wirusa CMV w kontekście dwóch alleli HLA**. Wynik
+zapisywany jest jako `training_ready_data/CMV_Dataset.pkl`:
 
 ```
-training_ready_data/{CMV_Dataset,Train_data,Val_data,Test.data}.pkl
+133 914 interakcji  =  66 957 unikalnych TCR  ×  2 allele
 ```
 
-> Repozytorium zawiera te pliki w LFS. Jeśli chcesz **dokładnie** powtórzyć liczby z pracy,
-> pomiń ten krok i użyj splitów z repo — ponowny podział da inne zbiory.
+Każdy receptor występuje dokładnie dwa razy — raz sparowany z `HLA-A0301`, raz z `HLA-A2402`.
+Stąd bierze się **dwuelementowe kodowanie MHC** we wszystkich modelach (`mhc_id`, one-hot 2-d
+w MLP/GNN, `nn.Embedding(2, 16)` w CNN).
+
+> **Rozkład etykiet jest skrajnie asymetryczny względem allelu:**
+>
+> | Allel | pozytywnych | udział |
+> |---|---|---|
+> | `HLA-A0301` | 13 876 / 66 957 | **20,7 %** |
+> | `HLA-A2402` | 30 / 66 957 | **0,04 %** |
+>
+> Praktycznie cały sygnał klasy pozytywnej siedzi przy `HLA-A0301`. Dlatego sama flaga allelu
+> jest silnym predyktorem — `audit_knn.py` pokazuje spadek PR-AUC z 0,548 do 0,364 po jej
+> usunięciu — i dlatego istnieje `within_a0301.py`, który trzyma allel stały i mierzy
+> wyłącznie wkład tożsamości TCR (patrz sekcja `sec:within_allele` w pracy).
+
+#### 2c. Podział **po TCR**, nie po wierszach
+
+Podział jest **grupowy**: jednostką losowania jest receptor, nie pojedyncza interakcja.
+Dzięki temu ten sam TCR nie może trafić jednocześnie do treningu i do testu.
+
+```python
+rng = np.random.default_rng(seed=42)
+# losowanie partiami po 100 receptorów, aż liczba interakcji osiągnie 20 % zbioru
+while test_nrow >= 0:
+    tcr_i = rng.choice(TCRs, size=100)
+    test_nrow -= <liczba interakcji tych receptorów>
+    test_tcr = np.append(test_tcr, tcr_i)
+```
+
+Najpierw wydzielany jest zbiór testowy (cel: 20 % interakcji), potem — z **pozostałych**
+receptorów — walidacyjny (kolejne 20 %). Reszta stanowi zbiór treningowy. Ziarno `42` czyni
+podział powtarzalnym.
+
+Faktyczny wynik (zweryfikowany na plikach z repozytorium):
+
+| Zbiór | Interakcji | Udział | Unikalnych TCR | % pozytywnych |
+|---|---|---|---|---|
+| Train | 85 588 | 63,9 % | 42 794 | 10,3 % |
+| Val   | 23 968 | 17,9 % | 11 984 | 10,6 % |
+| Test  | 24 358 | 18,2 % | 12 179 | 10,5 % |
+
+Kontrola rozdzielności zbiorów receptorów — część wspólna wynosi zero w każdej parze:
+
+```
+Train ∩ Val = 0     Train ∩ Test = 0     Val ∩ Test = 0
+```
+
+Udziały nie są równo 20 % / 20 %, bo pętla dolosowuje całe partie po 100 receptorów i
+zatrzymuje się dopiero po przekroczeniu progu.
+
+Zapis:
+
+```
+training_ready_data/CMV_Dataset.pkl     # zbiór po zawężeniu (133 914 wierszy)
+training_ready_data/Train_data.pkl
+training_ready_data/Val_data.pkl
+training_ready_data/Test.data.pkl       # uwaga: kropka, nie podkreślnik
+```
+
+> Etykiety w `Train_data.pkl` zapisane są jako łańcuchy (`"Binding"` / `"Non-binding"`)
+> i mapowane na 0/1 dopiero przy imporcie `model_base.py`. Pliki `Val`/`Test` mają już
+> wartości całkowite.
+
+> **Repozytorium zawiera gotowe splity w LFS.** Jeśli chcesz odtworzyć dokładnie liczby
+> z pracy, pomiń ten krok. Ponowne uruchomienie notebooka na danych pobranych z nowszej
+> wersji bazy TRAIT da inny podział.
 
 ### Krok 3 — embeddingi per-residue dla CNN (wolne, GPU)
 
