@@ -1,0 +1,38 @@
+# Środowisko zweryfikowane na Python 3.14.2 / CUDA 12.6 (NVIDIA TITAN RTX).
+# Instalacja:
+#   conda create -n mgr_thesis python=3.14 && conda activate mgr_thesis
+#   pip install -r requirements.txt
+
+# --- PyTorch (build CUDA 12.6) ---
+# Wymaga dodatkowego indeksu:
+#   pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu126
+torch==2.11.0
+
+# --- Modele grafowe ---
+dhg==0.9.6
+
+# --- Klasyczne ML / dane ---
+scikit-learn==1.7.2
+pandas==2.3.3
+numpy==2.3.5
+scipy==1.16.3
+
+# --- Wykresy (Evaluator.py, regen_gnn_pr.py) ---
+matplotlib==3.10.9
+seaborn==0.13.2
+
+# --- Importowane, ale funkcjonalnie nieużywane ---
+# Obie pozycje są potrzebne tylko dlatego, że pliki .py mają je w sekcji importów
+# (pozostałość po konwersji z notebooków). Ich brak wywoła ImportError:
+#   model_base.py:28  ->  import import_ipynb
+#   graph.py:17       ->  import hnswlib   (aktywna ścieżka używa sklearn NearestNeighbors)
+import-ipynb==0.2
+hnswlib==0.8.0
+
+# --- Notebooki (train_test_split.ipynb, UMAP.ipynb) ---
+ipykernel==7.1.0
+
+# --- ESM2 ---
+# NIE instalowany przez pip. Data_prep.py / CNN_embeddings.py pobierają
+# esm2_t30_150M_UR50D przez torch.hub.load("facebookresearch/esm", ...) —
+# pierwsze uruchomienie wymaga internetu.
